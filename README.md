@@ -24,7 +24,7 @@ A KDE Plasma panel widget that shows a live list of running applications sorted 
 
 ```bash
 cd ~/.local/share/plasma/plasmoids/
-git clone https://github.com/PlasmaDrifter/processmonitor-icon local.widget.processmonitor-icon
+git clone https://github.com/PlasmaDrifter/Widget-processmonitor-icon local.widget.processmonitor-icon
 ```
 
 Then right-click your panel → **Add Widgets** → search for **Processor Utility**.
