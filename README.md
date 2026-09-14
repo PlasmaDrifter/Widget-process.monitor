@@ -2,7 +2,7 @@
 
 A KDE Plasma panel widget that shows a live list of running applications sorted by CPU or memory usage, with the ability to kill any process directly from the panel.
 
-![processormonitor](processor.png)
+![processormonitor](processor.gif)
 ![processormonitor](desktop-2.png)
 
 ## Features
