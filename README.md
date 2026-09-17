@@ -1,6 +1,8 @@
 # Processor Utility
 
-[![Reddit](https://img.shields.io/badge/Reddit-r%2FPlasmaDrifterProjects-FF4500?style=flat-square&logo=reddit&logoColor=white)](https://reddit.com/r/PlasmaDrifterProjects)
+> [!NOTE]
+> **Community Hub:** Have questions, custom configs, or feature ideas? Join our subreddit community at [**r/PlasmaDrifterProjects**](https://reddit.com/r/PlasmaDrifterProjects)!
+
 A KDE Plasma panel widget that shows a live list of running applications sorted by CPU or memory usage, with the ability to kill any process directly from the panel.
 
 ![processormonitor](processor.gif)
