@@ -151,6 +151,9 @@ Item {
             if ((appLower.indexOf("zen") !== -1 && handledBrowserTitles["zen"]) || (appLower.indexOf("firefox") !== -1 && handledBrowserTitles["firefox"]) || (appLower.indexOf("chrome") !== -1 && handledBrowserTitles["chrome"]) || (appLower.indexOf("brave") !== -1 && handledBrowserTitles["brave"]))
                 continue;
 
+            if (appLower.indexOf("xdg-permission-store") !== -1 || appLower.indexOf("session.slice") !== -1)
+                continue;
+
             var iconName = String(appModel.data(iconIdx, Process.ProcessDataModel.Value) || "application-x-executable");
             var cpuRaw = String(appModel.data(cpuIdx, Process.ProcessDataModel.FormattedValue) || "0.0 %");
             var memFmt = String(appModel.data(memIdx, Process.ProcessDataModel.FormattedValue) || "–");
@@ -319,13 +322,14 @@ Item {
                 }
                 var appTitle = "Zen";
                 var iconName = "zen-browser";
-                if (argStr.indexOf("firefox") !== -1) {
+                var exeName = (argStr.split(/\s+/)[0] || "").toLowerCase();
+                if (exeName.indexOf("firefox") !== -1) {
                     appTitle = "Firefox";
                     iconName = "firefox";
-                } else if (argStr.indexOf("chrome") !== -1) {
+                } else if (exeName.indexOf("chrome") !== -1 || exeName.indexOf("chromium") !== -1) {
                     appTitle = "Chrome";
                     iconName = "google-chrome";
-                } else if (argStr.indexOf("brave") !== -1) {
+                } else if (exeName.indexOf("brave") !== -1) {
                     appTitle = "Brave";
                     iconName = "brave-browser";
                 }
@@ -340,13 +344,13 @@ Item {
                 var profKey = (appTitle + ":" + profName).toLowerCase();
                 if (!profiles[profKey])
                     profiles[profKey] = {
-                        "appName": appTitle + " (" + profName + ")",
-                        "iconName": iconName,
-                        "cpuRaw": 0,
-                        "rssKb": 0,
-                        "pids": [],
-                        "appTitle": appTitle
-                    };
+                    "appName": appTitle + " (" + profName + ")",
+                    "iconName": iconName,
+                    "cpuRaw": 0,
+                    "rssKb": 0,
+                    "pids": [],
+                    "appTitle": appTitle
+                };
 
                 profiles[profKey].cpuRaw += cpuInst;
                 profiles[profKey].rssKb += rssKb;
@@ -455,7 +459,9 @@ Item {
             "xdg-desktop-portal-gtk.service": "services",
             "org.kde.kdeconnect": "services",
             "org.kde.kwalletd6": "services",
-            "org.kde.kclockd": "services"
+            "org.kde.kclockd": "services",
+            "ser@1000.service/session.slice/xdg-permission-store.service": "services",
+            "xdg-permission-store.service": "services"
         }
         applicationOverrides: {
             "services": {
@@ -584,7 +590,7 @@ Item {
         id: browserProfileSource
 
         function fetchBrowserProfiles() {
-            connectSource("python3 -c \"import glob, os, re, json; procs = []; [procs.append(f'{pid} {int(ap[1])} {int(ap[11])+int(ap[12])} {pss} {cmd}') for p in glob.glob('/proc/[0-9]*') for pid in [int(os.path.basename(p))] if os.path.exists(f'/proc/{pid}/cmdline') and os.path.exists(f'/proc/{pid}/stat') for cmd in [open(f'/proc/{pid}/cmdline').read().replace('\\x00',' ')] if any(b in cmd for b in ['zen-bin','firefox','chrome','brave','chromium']) and 'antigravity' not in cmd for s in [open(f'/proc/{pid}/stat').read()] for ap in [s[s.rfind(')')+2:].split()] if len(ap)>=22 for pss in [next((int(line.split()[1]) for line in open(f'/proc/{pid}/smaps_rollup') if line.startswith('Pss:')), int(ap[21])*4) if os.path.exists(f'/proc/{pid}/smaps_rollup') else int(ap[21])*4]]; ps_out = '\\n'.join(procs); icons = {}; [icons.update({wm.group(1).strip().lower(): ic.group(1).strip()}) for path in glob.glob(os.path.expanduser('~/.local/share/applications/*.desktop')) + glob.glob('/usr/share/applications/*.desktop') if os.path.exists(path) for content in [open(path, errors='ignore').read()] for wm in [re.search(r'^StartupWMClass=(.*)$', content, re.M)] if wm for ic in [re.search(r'^Icon=(.*)$', content, re.M)] if ic]; print(json.dumps({'ps': ps_out, 'icons': icons}))\" 2>/dev/null || true");
+            connectSource("python3 -c \"import glob, os, re, json; procs = []; [procs.append(f'{pid} {int(ap[1])} {int(ap[11])+int(ap[12])} {pss} {cmd}') for p in glob.glob('/proc/[0-9]*') for pid in [int(os.path.basename(p))] if os.path.exists(f'/proc/{pid}/cmdline') and os.path.exists(f'/proc/{pid}/stat') for cmd in [open(f'/proc/{pid}/cmdline').read().replace('\\x00',' ')] for exe in [cmd.split()[0] if cmd.strip() else ''] if os.path.basename(exe) in ['zen','zen-bin','firefox','firefox-bin','chrome','google-chrome','chromium','brave','brave-browser'] for s in [open(f'/proc/{pid}/stat').read()] for ap in [s[s.rfind(')')+2:].split()] if len(ap)>=22 for pss in [next((int(line.split()[1]) for line in open(f'/proc/{pid}/smaps_rollup') if line.startswith('Pss:')), int(ap[21])*4) if os.path.exists(f'/proc/{pid}/smaps_rollup') else int(ap[21])*4]]; ps_out = '\\n'.join(procs); icons = {}; [icons.update({wm.group(1).strip().lower(): ic.group(1).strip()}) for path in glob.glob(os.path.expanduser('~/.local/share/applications/*.desktop')) + glob.glob('/usr/share/applications/*.desktop') if os.path.exists(path) for content in [open(path, errors='ignore').read()] for wm in [re.search(r'^StartupWMClass=(.*)$', content, re.M)] if wm for ic in [re.search(r'^Icon=(.*)$', content, re.M)] if ic]; print(json.dumps({'ps': ps_out, 'icons': icons}))\" 2>/dev/null || true");
         }
 
         engine: "executable"
