@@ -2,6 +2,9 @@
 
 A KDE Plasma panel widget that shows a live list of running applications sorted by CPU or memory usage, with the ability to kill any process directly from the panel.
 
+> [!NOTE]
+> **Questions, custom configs, or ideas?** Join us on Reddit at <nobr>[**r/PlasmaDrifterProjects**](https://reddit.com/r/PlasmaDrifterProjects)</nobr>!
+
 ![processormonitor](processor.gif)
 ![processormonitor](desktop-2.png)
 
@@ -40,3 +43,10 @@ Right-click the widget → **Configure…**
 | Icon colour | The tint colour (only active when colourize is on) |
 | Refresh interval | How often to refresh the process list (seconds) |
 
+---
+
+## 💬 Community & Discussions
+
+Got questions, setup ideas, or feedback?
+
+* 🌐 Join our subreddit at [**r/PlasmaDrifterProjects**](https://reddit.com/r/PlasmaDrifterProjects) to discuss updates, get support, and share configurations.
