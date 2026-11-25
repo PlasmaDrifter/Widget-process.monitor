@@ -4,6 +4,7 @@ import QtQuick.Layouts
 import QtQuick.Window
 import org.kde.kirigami as Kirigami
 import org.kde.ksysguard.process as Process
+import org.kde.ksysguard.sensors as Sensors
 import org.kde.plasma.components as PlasmaComponents3
 import org.kde.plasma.plasma5support as Plasma5Support
 import org.kde.plasma.plasmoid
@@ -26,7 +27,7 @@ Item {
             return Kirigami.Units.gridUnit * 20;
 
         var baseH = marginsH + headerH + rows.length * rowH;
-        if ((root.uptimeDisplayMode !== 0 && root.systemUptimeStr !== "") || root.cpuTempStr !== "" || root.gpuTempStr !== "")
+        if ((root.uptimeDisplayMode === 2 && root.systemUptimeStr !== "") || root.cpuTempStr !== "" || root.gpuTempStr !== "")
             baseH += Kirigami.Units.gridUnit * 1.5;
 
         return baseH;
@@ -35,7 +36,8 @@ Item {
     readonly property int colIcon: 1
     readonly property int colCpu: 2
     readonly property int colMem: 3
-    readonly property int cpuCoreCount: 16
+    property int cpuCoreCount: 16
+    readonly property int refreshMs: Math.max(1000, (Plasmoid.configuration.refreshInterval || 3) * 1000)
     // Adjust these widths to your preference
     property int nameWidth: 300
     property int cpuWidth: 80
@@ -46,8 +48,8 @@ Item {
     property var rows: []
     property var vmRows: []
     property var browserProfileRows: []
-    property var prevCpuTicks: ({
-    })
+    property var cachedDesktopIcons: ({})
+    property var prevCpuTicks: ({})
     property real lastCpuPollTime: 0
     property bool firstUpdatePending: false
     property string systemUptimeStr: ""
@@ -148,7 +150,10 @@ Item {
             var memIdx = appModel.index(i, root.colMem);
             var appName = String(appModel.data(nameIdx, Process.ProcessDataModel.Value) || "");
             var appLower = appName.toLowerCase();
-            if ((appLower.indexOf("zen") !== -1 && handledBrowserTitles["zen"]) || (appLower.indexOf("firefox") !== -1 && handledBrowserTitles["firefox"]) || (appLower.indexOf("chrome") !== -1 && handledBrowserTitles["chrome"]) || (appLower.indexOf("brave") !== -1 && handledBrowserTitles["brave"]))
+            if ((handledBrowserTitles["zen"] && /\bzen\b/.test(appLower)) ||
+                (handledBrowserTitles["firefox"] && /\bfirefox\b/.test(appLower)) ||
+                (handledBrowserTitles["chrome"] && (/\b(google-)?chrome\b/.test(appLower) || /\bchromium\b/.test(appLower))) ||
+                (handledBrowserTitles["brave"] && /\bbrave\b/.test(appLower)))
                 continue;
 
             if (appLower.indexOf("xdg-permission-store") !== -1 || appLower.indexOf("session.slice") !== -1)
@@ -235,42 +240,14 @@ Item {
         root.rebuildRows();
     }
 
-    function parseTemps(stdout) {
-        var parts = stdout.trim().split(/\s+/);
-        if (parts.length >= 2) {
-            var cpuRaw = parseFloat(parts[0]);
-            var gpuRaw = parseFloat(parts[1]);
-            if (!isNaN(cpuRaw) && cpuRaw > 0)
-                root.cpuTempStr = (cpuRaw / 1000).toFixed(0) + "°C";
-            else
-                root.cpuTempStr = "";
-            if (!isNaN(gpuRaw) && gpuRaw > 0)
-                root.gpuTempStr = (gpuRaw / 1000).toFixed(0) + "°C";
-            else
-                root.gpuTempStr = "";
-        } else {
-            root.cpuTempStr = "";
-            root.gpuTempStr = "";
-        }
-    }
-
     function parseBrowserProfiles(stdout) {
         if (!stdout) {
             root.browserProfileRows = [];
             root.rebuildRows();
             return ;
         }
-        var psOutput = "";
-        var desktopIcons = {
-        };
-        try {
-            var parsed = JSON.parse(stdout);
-            psOutput = parsed.ps || "";
-            desktopIcons = parsed.icons || {
-            };
-        } catch (e) {
-            psOutput = stdout;
-        }
+        var psOutput = stdout;
+        var desktopIcons = root.cachedDesktopIcons;
         var now = Date.now();
         var dt = root.lastCpuPollTime > 0 ? Math.max(0.1, (now - root.lastCpuPollTime) / 1000) : 1;
         var nextCpuTicks = {
@@ -415,17 +392,21 @@ Item {
     Layout.preferredHeight: popupHeight
     Layout.minimumHeight: popupHeight
     Layout.maximumHeight: popupHeight
+    function triggerRefresh() {
+        vmSource.fetchVMs();
+        browserProfileSource.fetchBrowserProfiles();
+        root.rebuildRows();
+    }
+
     onIsWindowVisibleChanged: {
         if (isWindowVisible) {
             firstUpdatePending = true;
             firstUpdateTimer.restart();
-            if (root.uptimeDisplayMode !== 0)
-                uptimeSource.fetchUptime();
-
-            vmSource.fetchVMs();
-            tempSource.fetchTemps();
-            browserProfileSource.fetchBrowserProfiles();
+            triggerRefresh();
         }
+    }
+    Component.onCompleted: {
+        desktopIconSource.fetchIcons();
     }
     onSortColumnChanged: rebuildRows()
     onSortAscendingChanged: rebuildRows()
@@ -503,30 +484,11 @@ Item {
     }
 
     Timer {
-        id: uptimeTimer
-
-        interval: 600000 // 10 minutes
-        running: root.Window.window ? root.Window.window.visible : false
+        interval: root.refreshMs
+        running: root.isWindowVisible
         repeat: true
         triggeredOnStart: false
-        onTriggered: {
-            if (root.uptimeDisplayMode !== 0)
-                uptimeSource.fetchUptime();
-
-        }
-    }
-
-    Timer {
-        interval: Math.max(1000, Plasmoid.configuration.refreshInterval * 1000)
-        running: root.Window.window ? root.Window.window.visible : false
-        repeat: true
-        triggeredOnStart: true
-        onTriggered: {
-            vmSource.fetchVMs();
-            tempSource.fetchTemps();
-            browserProfileSource.fetchBrowserProfiles();
-            root.rebuildRows();
-        }
+        onTriggered: root.triggerRefresh()
     }
 
     Process.ProcessController {
@@ -535,22 +497,42 @@ Item {
         window: root.Window.window
     }
 
-    Plasma5Support.DataSource {
-        id: uptimeSource
-
-        function fetchUptime() {
-            connectSource("cat /proc/uptime");
+    Sensors.Sensor {
+        sensorId: "cpu/all/coreCount"
+        enabled: true
+        onValueChanged: {
+            if (value !== undefined && Number(value) > 0) {
+                root.cpuCoreCount = Math.round(Number(value));
+            }
         }
+    }
 
-        engine: "executable"
-        connectedSources: []
-        onNewData: function(source, data) {
-            disconnectSource(source);
-            var stdout = data["stdout"] || "";
-            var uptimeSec = parseFloat(stdout.trim().split(" ")[0]) || 0;
-            if (uptimeSec > 0)
-                root.systemUptimeStr = root.formatUptime(uptimeSec);
+    Sensors.Sensor {
+        sensorId: "os/system/uptime"
+        updateRateLimit: 10000
+        enabled: root.isWindowVisible && root.uptimeDisplayMode !== 0
+        onValueChanged: {
+            if (value !== undefined && Number(value) > 0) {
+                root.systemUptimeStr = root.formatUptime(Number(value));
+            }
+        }
+    }
 
+    Sensors.Sensor {
+        sensorId: "cpu/all/averageTemperature"
+        updateRateLimit: root.refreshMs
+        enabled: root.isWindowVisible
+        onValueChanged: {
+            root.cpuTempStr = (value !== undefined && !isNaN(value) && Number(value) > 0) ? Math.round(Number(value)) + "°C" : "";
+        }
+    }
+
+    Sensors.Sensor {
+        sensorId: "gpu/gpu0/temperature"
+        updateRateLimit: root.refreshMs
+        enabled: root.isWindowVisible
+        onValueChanged: {
+            root.gpuTempStr = (value !== undefined && !isNaN(value) && Number(value) > 0) ? Math.round(Number(value)) + "°C" : "";
         }
     }
 
@@ -571,18 +553,22 @@ Item {
     }
 
     Plasma5Support.DataSource {
-        id: tempSource
+        id: desktopIconSource
 
-        function fetchTemps() {
-            connectSource("cpu_temp=\"\"; gpu_temp=\"\"; for d in /sys/class/hwmon/hwmon*; do name=$(cat $d/name 2>/dev/null); if [ \"$name\" = \"k10temp\" ] || [ \"$name\" = \"coretemp\" ]; then cpu_temp=$(cat $d/temp1_input 2>/dev/null); elif [ \"$name\" = \"amdgpu\" ]; then gpu_temp=$(cat $d/temp1_input 2>/dev/null); fi; done; echo \"$cpu_temp $gpu_temp\"");
+        function fetchIcons() {
+            connectSource("python3 -c \"import glob, os, re, json; icons = {}; [icons.update({wm.group(1).strip().lower(): ic.group(1).strip()}) for path in glob.glob(os.path.expanduser('~/.local/share/applications/*.desktop')) + glob.glob('/usr/share/applications/*.desktop') if os.path.exists(path) for content in [open(path, errors='ignore').read()] for wm in [re.search(r'^StartupWMClass=(.*)$', content, re.M)] if wm for ic in [re.search(r'^Icon=(.*)$', content, re.M)] if ic]; print(json.dumps(icons))\" 2>/dev/null || echo '{}'");
         }
 
         engine: "executable"
         connectedSources: []
         onNewData: function(source, data) {
             disconnectSource(source);
-            var stdout = data["stdout"] || "";
-            root.parseTemps(stdout);
+            try {
+                var parsed = JSON.parse((data["stdout"] || "{}").trim() || "{}");
+                if (parsed && typeof parsed === "object") {
+                    root.cachedDesktopIcons = parsed;
+                }
+            } catch (e) {}
         }
     }
 
@@ -590,7 +576,7 @@ Item {
         id: browserProfileSource
 
         function fetchBrowserProfiles() {
-            connectSource("python3 -c \"import glob, os, re, json; procs = []; [procs.append(f'{pid} {int(ap[1])} {int(ap[11])+int(ap[12])} {pss} {cmd}') for p in glob.glob('/proc/[0-9]*') for pid in [int(os.path.basename(p))] if os.path.exists(f'/proc/{pid}/cmdline') and os.path.exists(f'/proc/{pid}/stat') for cmd in [open(f'/proc/{pid}/cmdline').read().replace('\\x00',' ')] for exe in [cmd.split()[0] if cmd.strip() else ''] if ('/zen/' in exe.lower() or os.path.basename(exe).lower().startswith('zen') or os.path.basename(exe).lower() in ['firefox','firefox-bin','chrome','google-chrome','chromium','brave','brave-browser']) for s in [open(f'/proc/{pid}/stat').read()] for ap in [s[s.rfind(')')+2:].split()] if len(ap)>=22 for pss in [next((int(line.split()[1]) for line in open(f'/proc/{pid}/smaps_rollup') if line.startswith('Pss:')), int(ap[21])*4) if os.path.exists(f'/proc/{pid}/smaps_rollup') else int(ap[21])*4]]; ps_out = '\\n'.join(procs); icons = {}; [icons.update({wm.group(1).strip().lower(): ic.group(1).strip()}) for path in glob.glob(os.path.expanduser('~/.local/share/applications/*.desktop')) + glob.glob('/usr/share/applications/*.desktop') if os.path.exists(path) for content in [open(path, errors='ignore').read()] for wm in [re.search(r'^StartupWMClass=(.*)$', content, re.M)] if wm for ic in [re.search(r'^Icon=(.*)$', content, re.M)] if ic]; print(json.dumps({'ps': ps_out, 'icons': icons}))\" 2>/dev/null || true");
+            connectSource("python3 -c \"import glob, os; procs = []; [procs.append(f'{pid} {int(ap[1])} {int(ap[11])+int(ap[12])} {pss} {cmd}') for p in glob.glob('/proc/[0-9]*') for pid in [int(os.path.basename(p))] if os.path.exists(f'/proc/{pid}/cmdline') and os.path.exists(f'/proc/{pid}/stat') for cmd in [open(f'/proc/{pid}/cmdline').read().replace('\\x00',' ')] for exe in [cmd.split()[0] if cmd.strip() else ''] if ('/zen/' in exe.lower() or os.path.basename(exe).lower().startswith('zen') or os.path.basename(exe).lower() in ['firefox','firefox-bin','chrome','google-chrome','chromium','brave','brave-browser']) for s in [open(f'/proc/{pid}/stat').read()] for ap in [s[s.rfind(')')+2:].split()] if len(ap)>=22 for pss in [next((int(line.split()[1]) for line in open(f'/proc/{pid}/smaps_rollup') if line.startswith('Pss:')), int(ap[21])*4) if os.path.exists(f'/proc/{pid}/smaps_rollup') else int(ap[21])*4]]; print('\\n'.join(procs))\" 2>/dev/null || true");
         }
 
         engine: "executable"
@@ -614,14 +600,14 @@ Item {
             id: topInfoRow
 
             Layout.fillWidth: true
-            visible: (root.uptimeDisplayMode !== 0 && root.systemUptimeStr !== "") || root.cpuTempStr !== "" || root.gpuTempStr !== ""
+            visible: (root.uptimeDisplayMode === 2 && root.systemUptimeStr !== "") || root.cpuTempStr !== "" || root.gpuTempStr !== ""
             Layout.leftMargin: Kirigami.Units.smallSpacing * 2
             Layout.rightMargin: Kirigami.Units.smallSpacing * 2 + (Kirigami.Units.iconSizes.smallMedium + Kirigami.Units.smallSpacing * 2) / 2
 
             QQC2.Label {
                 id: uptimeLabel
 
-                visible: root.uptimeDisplayMode !== 0 && root.systemUptimeStr !== ""
+                visible: root.uptimeDisplayMode === 2 && root.systemUptimeStr !== ""
                 text: i18n("Uptime: %1", root.systemUptimeStr)
                 font.pointSize: Kirigami.Theme.defaultFont.pointSize * 0.9
                 font.italic: true
@@ -669,7 +655,7 @@ Item {
                 label: i18n("Process Name")
                 col: "name"
                 alignment: Qt.AlignLeft
-                extraText: ""
+                extraText: (root.uptimeDisplayMode === 1 && root.systemUptimeStr !== "") ? i18n("Uptime: %1", root.systemUptimeStr) : ""
                 onSortClicked: {
                     if (root.sortColumn === "name") {
                         root.sortAscending = !root.sortAscending;
