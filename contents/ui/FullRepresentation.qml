@@ -37,6 +37,7 @@ Item {
     readonly property int colCpu: 2
     readonly property int colMem: 3
     property int cpuCoreCount: 16
+    property bool coreCountLoaded: false
     readonly property int refreshMs: Math.max(1000, (Plasmoid.configuration.refreshInterval || 3) * 1000)
     // Adjust these widths to your preference
     property int nameWidth: 300
@@ -424,7 +425,7 @@ Item {
         id: appModel
 
         enabledAttributes: ["appName", "iconName", "usage", "memory"]
-        enabled: true
+        enabled: root.isWindowVisible
         cgroupMapping: {
             "session.slice": "services",
             "background.slice": "services",
@@ -467,9 +468,13 @@ Item {
 
         }
         onDataChanged: {
-            if (root.isWindowVisible && root.firstUpdatePending) {
-                root.firstUpdatePending = false;
-                firstUpdateTimer.restart();
+            if (root.isWindowVisible) {
+                if (root.firstUpdatePending) {
+                    root.firstUpdatePending = false;
+                    firstUpdateTimer.restart();
+                } else {
+                    debounceTimer.restart();
+                }
             }
         }
     }
@@ -499,10 +504,11 @@ Item {
 
     Sensors.Sensor {
         sensorId: "cpu/all/coreCount"
-        enabled: true
+        enabled: !root.coreCountLoaded
         onValueChanged: {
             if (value !== undefined && Number(value) > 0) {
                 root.cpuCoreCount = Math.round(Number(value));
+                root.coreCountLoaded = true;
             }
         }
     }
