@@ -25,5 +25,41 @@
             <label>Where to display system uptime (0=Disabled, 1=Header, 2=Footer)</label>
             <default>2</default>
         </entry>
+        <entry name="useCustomInfoColor" type="Bool">
+            <label>Use custom color for uptime and non-threshold temperature readouts</label>
+            <default>false</default>
+        </entry>
+        <entry name="uptimeValueColor" type="String">
+            <label>Custom color for uptime and non-threshold temperature readouts</label>
+            <default>#3daee9</default>
+        </entry>
+        <entry name="tempColorByThreshold" type="Bool">
+            <label>Color CPU and GPU temperatures by thermal thresholds</label>
+            <default>true</default>
+        </entry>
+        <entry name="tempWarmThreshold" type="Int">
+            <label>Warm temperature threshold in Celsius</label>
+            <default>65</default>
+        </entry>
+        <entry name="tempHotThreshold" type="Int">
+            <label>Hot temperature threshold in Celsius</label>
+            <default>80</default>
+        </entry>
+        <entry name="useCustomTempColors" type="Bool">
+            <label>Use custom cool, warm, and hot temperature colors</label>
+            <default>false</default>
+        </entry>
+        <entry name="tempCoolColor" type="String">
+            <label>Custom cool temperature color</label>
+            <default>#27ae60</default>
+        </entry>
+        <entry name="tempWarmColor" type="String">
+            <label>Custom warm temperature color</label>
+            <default>#f67400</default>
+        </entry>
+        <entry name="tempHotColor" type="String">
+            <label>Custom hot temperature color</label>
+            <default>#da4453</default>
+        </entry>
     </group>
 </kcfg>

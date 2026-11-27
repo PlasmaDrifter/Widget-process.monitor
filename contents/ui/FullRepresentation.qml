@@ -56,12 +56,58 @@ Item {
     property string systemUptimeStr: ""
     property string cpuTempStr: ""
     property string gpuTempStr: ""
+    property real cpuTempVal: NaN
+    property real gpuTempVal: NaN
     property bool hwmonChecked: false
     property bool hwmonCpuFound: false
     property bool hwmonGpuFound: false
     readonly property int uptimeDisplayMode: {
         var val = Plasmoid.configuration.systemUptimeDisplay;
         return (val === undefined) ? 2 : val;
+    }
+    readonly property bool useCustomInfoColor: Boolean(Plasmoid.configuration.useCustomInfoColor)
+    readonly property color uptimeDataColor: {
+        var custom = String(Plasmoid.configuration.uptimeValueColor || "").trim();
+        return (useCustomInfoColor && custom.length > 0) ? custom : Kirigami.Theme.highlightColor;
+    }
+    readonly property bool tempColorByThreshold: {
+        var val = Plasmoid.configuration.tempColorByThreshold;
+        return (val === undefined) ? true : Boolean(val);
+    }
+    readonly property int tempWarmThreshold: {
+        var val = Number(Plasmoid.configuration.tempWarmThreshold);
+        return (!isNaN(val) && val > 0) ? Math.round(val) : 65;
+    }
+    readonly property int tempHotThreshold: {
+        var val = Number(Plasmoid.configuration.tempHotThreshold);
+        var hot = (!isNaN(val) && val > 0) ? Math.round(val) : 80;
+        return Math.max(tempWarmThreshold + 1, hot);
+    }
+    readonly property bool useCustomTempColors: Boolean(Plasmoid.configuration.useCustomTempColors)
+    readonly property color customCoolColor: {
+        var c = String(Plasmoid.configuration.tempCoolColor || "").trim();
+        return c.length > 0 ? c : "#27ae60";
+    }
+    readonly property color customWarmColor: {
+        var c = String(Plasmoid.configuration.tempWarmColor || "").trim();
+        return c.length > 0 ? c : "#f67400";
+    }
+    readonly property color customHotColor: {
+        var c = String(Plasmoid.configuration.tempHotColor || "").trim();
+        return c.length > 0 ? c : "#da4453";
+    }
+
+    function tempColorForValue(tempC) {
+        if (!root.tempColorByThreshold || isNaN(tempC))
+            return root.uptimeDataColor;
+
+        if (tempC >= root.tempHotThreshold)
+            return root.useCustomTempColors ? root.customHotColor : Kirigami.Theme.negativeTextColor;
+
+        if (tempC >= root.tempWarmThreshold)
+            return root.useCustomTempColors ? root.customWarmColor : Kirigami.Theme.neutralTextColor;
+
+        return root.useCustomTempColors ? root.customCoolColor : Kirigami.Theme.positiveTextColor;
     }
 
     function resolveBrowserIcon(appTitle, wmClass, profName, fallbackIcon) {
@@ -533,8 +579,11 @@ Item {
         updateRateLimit: root.cpuTempStr !== "" ? root.refreshMs : 0
         enabled: root.isWindowVisible && root.hwmonChecked && !root.hwmonCpuFound
         onValueChanged: {
-            if (value !== undefined && !isNaN(value) && Number(value) > 0)
-                root.cpuTempStr = Math.round(Number(value)) + "°C";
+            if (value !== undefined && !isNaN(value) && Number(value) > 0) {
+                var c = Math.round(Number(value));
+                root.cpuTempVal = c;
+                root.cpuTempStr = c + "°C";
+            }
         }
     }
 
@@ -543,8 +592,11 @@ Item {
         updateRateLimit: root.gpuTempStr !== "" ? root.refreshMs : 0
         enabled: root.isWindowVisible && root.hwmonChecked && !root.hwmonGpuFound
         onValueChanged: {
-            if (value !== undefined && !isNaN(value) && Number(value) > 0)
-                root.gpuTempStr = Math.round(Number(value)) + "°C";
+            if (value !== undefined && !isNaN(value) && Number(value) > 0) {
+                var g = Math.round(Number(value));
+                root.gpuTempVal = g;
+                root.gpuTempStr = g + "°C";
+            }
         }
     }
 
@@ -573,13 +625,17 @@ Item {
                 var cpuRaw = parseFloat(parts[1]);
                 if (!isNaN(cpuRaw) && cpuRaw > 0) {
                     root.hwmonCpuFound = true;
-                    root.cpuTempStr = Math.round(cpuRaw / 1000) + "°C";
+                    var cpuC = Math.round(cpuRaw / 1000);
+                    root.cpuTempVal = cpuC;
+                    root.cpuTempStr = cpuC + "°C";
                 }
 
                 var gpuRaw = parseFloat(parts[2]);
                 if (!isNaN(gpuRaw) && gpuRaw > 0) {
                     root.hwmonGpuFound = true;
-                    root.gpuTempStr = Math.round(gpuRaw / 1000) + "°C";
+                    var gpuC = Math.round(gpuRaw / 1000);
+                    root.gpuTempVal = gpuC;
+                    root.gpuTempStr = gpuC + "°C";
                 }
             }
             root.hwmonChecked = true;
@@ -656,39 +712,43 @@ Item {
             Layout.leftMargin: Kirigami.Units.smallSpacing * 2
             Layout.rightMargin: Kirigami.Units.smallSpacing * 2 + (Kirigami.Units.iconSizes.smallMedium + Kirigami.Units.smallSpacing * 2) / 2
 
-            QQC2.Label {
+            InfoMetric {
                 id: uptimeLabel
 
                 visible: root.uptimeDisplayMode !== 0 && root.systemUptimeStr !== ""
-                text: i18n("Uptime: %1", root.systemUptimeStr)
-                font.pointSize: Kirigami.Theme.defaultFont.pointSize * 0.9
-                font.italic: true
-                color: Kirigami.Theme.textColor
-                opacity: 0.8
+                nameText: i18n("Uptime:")
+                valueText: root.systemUptimeStr
+                valueColor: root.uptimeDataColor
             }
 
             Item {
                 Layout.fillWidth: true
             }
 
-            QQC2.Label {
-                id: tempsLabel
+            RowLayout {
+                id: tempsGroup
 
                 visible: root.cpuTempStr !== "" || root.gpuTempStr !== ""
-                text: {
-                    var items = [];
-                    if (root.cpuTempStr !== "")
-                        items.push("CPU: " + root.cpuTempStr);
+                spacing: Kirigami.Units.largeSpacing
 
-                    if (root.gpuTempStr !== "")
-                        items.push("GPU: " + root.gpuTempStr);
+                InfoMetric {
+                    id: cpuTempMetric
 
-                    return items.join("   ");
+                    visible: root.cpuTempStr !== ""
+                    nameText: i18n("CPU:")
+                    valueText: root.cpuTempStr
+                    valueColor: root.tempColorForValue(root.cpuTempVal)
                 }
-                font.pointSize: Kirigami.Theme.defaultFont.pointSize * 0.9
-                font.italic: true
-                color: Kirigami.Theme.textColor
-                opacity: 0.8
+
+                InfoMetric {
+                    id: gpuTempMetric
+
+                    visible: root.gpuTempStr !== ""
+                    nameText: i18n("GPU:")
+                    valueText: root.gpuTempStr
+                    valueColor: root.tempColorForValue(root.gpuTempVal)
+                }
+
             }
 
         }
@@ -911,6 +971,35 @@ Item {
                 processController.sendSignal(pids, 9);
 
         }
+    }
+
+    component InfoMetric: RowLayout {
+        id: metricRoot
+
+        property string nameText: ""
+        property string valueText: ""
+        property color valueColor: Kirigami.Theme.highlightColor
+
+        spacing: Kirigami.Units.smallSpacing
+
+        QQC2.Label {
+            text: metricRoot.nameText
+            font.pointSize: Kirigami.Theme.defaultFont.pointSize * 0.9
+            font.italic: true
+            color: Kirigami.Theme.textColor
+            opacity: 0.78
+        }
+
+        QQC2.Label {
+            text: metricRoot.valueText
+            font.pointSize: Kirigami.Theme.defaultFont.pointSize * 0.9
+            font.weight: Font.DemiBold
+            font.features: {
+                "tnum": 1
+            }
+            color: metricRoot.valueColor
+        }
+
     }
 
     component SortHeader: Item {
