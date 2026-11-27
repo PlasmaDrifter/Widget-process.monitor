@@ -27,7 +27,7 @@ Item {
             return Kirigami.Units.gridUnit * 20;
 
         var baseH = marginsH + headerH + rows.length * rowH;
-        if ((root.uptimeDisplayMode === 2 && root.systemUptimeStr !== "") || root.cpuTempStr !== "" || root.gpuTempStr !== "")
+        if ((root.uptimeDisplayMode !== 0 && root.systemUptimeStr !== "") || root.cpuTempStr !== "" || root.gpuTempStr !== "")
             baseH += Kirigami.Units.gridUnit * 1.5;
 
         return baseH;
@@ -56,9 +56,24 @@ Item {
     property string systemUptimeStr: ""
     property string cpuTempStr: ""
     property string gpuTempStr: ""
+    property bool hwmonChecked: false
+    property bool hwmonCpuFound: false
+    property bool hwmonGpuFound: false
     readonly property int uptimeDisplayMode: {
         var val = Plasmoid.configuration.systemUptimeDisplay;
         return (val === undefined) ? 2 : val;
+    }
+
+    function resolveBrowserIcon(appTitle, wmClass, profName, fallbackIcon) {
+        var desktopIcons = root.cachedDesktopIcons;
+        var lookupKey = wmClass ? wmClass.toLowerCase() : (profName ? profName.toLowerCase() : "");
+        if (lookupKey && desktopIcons[lookupKey])
+            return desktopIcons[lookupKey];
+        if (wmClass && desktopIcons["zen-" + lookupKey])
+            return desktopIcons["zen-" + lookupKey];
+        if (appTitle && desktopIcons[appTitle.toLowerCase()])
+            return desktopIcons[appTitle.toLowerCase()];
+        return fallbackIcon;
     }
 
     function parseMemoryBytes(str) {
@@ -124,9 +139,11 @@ Item {
         };
         if (root.browserProfileRows && root.browserProfileRows.length > 0) {
             for (var b = 0; b < root.browserProfileRows.length; b++) {
-                out.push(root.browserProfileRows[b]);
-                if (root.browserProfileRows[b].appTitle) {
-                    var tLower = root.browserProfileRows[b].appTitle.toLowerCase();
+                var bRow = root.browserProfileRows[b];
+                bRow.iconName = root.resolveBrowserIcon(bRow.appTitle, bRow.wmClass, bRow.profName, bRow.defaultIcon || bRow.iconName);
+                out.push(bRow);
+                if (bRow.appTitle) {
+                    var tLower = bRow.appTitle.toLowerCase();
                     handledBrowserTitles[tLower] = true;
                     if (tLower.indexOf("zen") !== -1)
                         handledBrowserTitles["zen"] = true;
@@ -248,7 +265,6 @@ Item {
             return ;
         }
         var psOutput = stdout;
-        var desktopIcons = root.cachedDesktopIcons;
         var now = Date.now();
         var dt = root.lastCpuPollTime > 0 ? Math.max(0.1, (now - root.lastCpuPollTime) / 1000) : 1;
         var nextCpuTicks = {
@@ -299,31 +315,27 @@ Item {
                     }
                 }
                 var appTitle = "Zen";
-                var iconName = "zen-browser";
+                var defaultIcon = "zen-browser";
                 var exeName = (argStr.split(/\s+/)[0] || "").toLowerCase();
                 if (exeName.indexOf("firefox") !== -1) {
                     appTitle = "Firefox";
-                    iconName = "firefox";
+                    defaultIcon = "firefox";
                 } else if (exeName.indexOf("chrome") !== -1 || exeName.indexOf("chromium") !== -1) {
                     appTitle = "Chrome";
-                    iconName = "google-chrome";
+                    defaultIcon = "google-chrome";
                 } else if (exeName.indexOf("brave") !== -1) {
                     appTitle = "Brave";
-                    iconName = "brave-browser";
+                    defaultIcon = "brave-browser";
                 }
-                // Check for custom icon from desktop shortcuts
-                var lookupKey = wmClass ? wmClass.toLowerCase() : profName.toLowerCase();
-                if (desktopIcons[lookupKey])
-                    iconName = desktopIcons[lookupKey];
-                else if (wmClass && desktopIcons["zen-" + lookupKey])
-                    iconName = desktopIcons["zen-" + lookupKey];
-                else if (desktopIcons[appTitle.toLowerCase()])
-                    iconName = desktopIcons[appTitle.toLowerCase()];
+                var iconName = root.resolveBrowserIcon(appTitle, wmClass, profName, defaultIcon);
                 var profKey = (appTitle + ":" + profName).toLowerCase();
                 if (!profiles[profKey])
                     profiles[profKey] = {
                     "appName": appTitle + " (" + profName + ")",
                     "iconName": iconName,
+                    "defaultIcon": defaultIcon,
+                    "wmClass": wmClass,
+                    "profName": profName,
                     "cpuRaw": 0,
                     "rssKb": 0,
                     "pids": [],
@@ -373,6 +385,9 @@ Item {
             temp.push({
                 "appName": pObj.appName,
                 "iconName": pObj.iconName,
+                "defaultIcon": pObj.defaultIcon,
+                "wmClass": pObj.wmClass,
+                "profName": pObj.profName,
                 "cpuFmt": scaledCpu.toFixed(1) + "%",
                 "cpuRaw": scaledCpu,
                 "memFmt": memFmt,
@@ -394,28 +409,47 @@ Item {
     Layout.minimumHeight: popupHeight
     Layout.maximumHeight: popupHeight
     function triggerRefresh() {
+        systemInfoSource.fetch();
         vmSource.fetchVMs();
         browserProfileSource.fetchBrowserProfiles();
         root.rebuildRows();
     }
 
+    onUptimeDisplayModeChanged: {
+        if (uptimeDisplayMode === 0)
+            root.systemUptimeStr = "";
+        else
+            systemInfoSource.fetch();
+    }
     onIsWindowVisibleChanged: {
         if (isWindowVisible) {
             firstUpdatePending = true;
-            firstUpdateTimer.restart();
             triggerRefresh();
+        } else {
+            firstUpdatePending = false;
+            dataUpdateTimer.stop();
         }
     }
     Component.onCompleted: {
         desktopIconSource.fetchIcons();
+        triggerRefresh();
     }
     onSortColumnChanged: rebuildRows()
     onSortAscendingChanged: rebuildRows()
 
     Timer {
-        id: firstUpdateTimer
+        id: structuralTimer
 
-        interval: 150
+        interval: 25
+        running: false
+        repeat: false
+        onTriggered: root.rebuildRows()
+    }
+
+    Timer {
+        id: dataUpdateTimer
+
+        interval: 250
         running: false
         repeat: false
         onTriggered: root.rebuildRows()
@@ -425,7 +459,7 @@ Item {
         id: appModel
 
         enabledAttributes: ["appName", "iconName", "usage", "memory"]
-        enabled: root.isWindowVisible
+        enabled: true
         cgroupMapping: {
             "session.slice": "services",
             "background.slice": "services",
@@ -452,40 +486,20 @@ Item {
             }
         }
         Component.onCompleted: root.rebuildRows()
-        onModelReset: {
-            if (root.isWindowVisible)
-                debounceTimer.restart();
-
-        }
-        onRowsInserted: {
-            if (root.isWindowVisible)
-                debounceTimer.restart();
-
-        }
-        onRowsRemoved: {
-            if (root.isWindowVisible)
-                debounceTimer.restart();
-
-        }
+        onModelReset: structuralTimer.restart()
+        onRowsInserted: structuralTimer.restart()
+        onRowsRemoved: structuralTimer.restart()
         onDataChanged: {
-            if (root.isWindowVisible) {
-                if (root.firstUpdatePending) {
-                    root.firstUpdatePending = false;
-                    firstUpdateTimer.restart();
-                } else {
-                    debounceTimer.restart();
-                }
+            if (!root.isWindowVisible)
+                return;
+
+            if (root.firstUpdatePending) {
+                root.firstUpdatePending = false;
+                structuralTimer.restart();
+            } else if (!dataUpdateTimer.running) {
+                dataUpdateTimer.start();
             }
         }
-    }
-
-    Timer {
-        id: debounceTimer
-
-        interval: 200
-        running: false
-        repeat: false
-        onTriggered: root.rebuildRows()
     }
 
     Timer {
@@ -513,32 +527,62 @@ Item {
         }
     }
 
-    Sensors.Sensor {
-        sensorId: "os/system/uptime"
-        updateRateLimit: 10000
-        enabled: root.isWindowVisible && root.uptimeDisplayMode !== 0
-        onValueChanged: {
-            if (value !== undefined && Number(value) > 0) {
-                root.systemUptimeStr = root.formatUptime(Number(value));
-            }
-        }
-    }
-
+    // Fallback sensors only if /sys/class/hwmon lacks a matching CPU/GPU thermal device (e.g. proprietary NVIDIA)
     Sensors.Sensor {
         sensorId: "cpu/all/averageTemperature"
-        updateRateLimit: root.refreshMs
-        enabled: root.isWindowVisible
+        updateRateLimit: root.cpuTempStr !== "" ? root.refreshMs : 0
+        enabled: root.isWindowVisible && root.hwmonChecked && !root.hwmonCpuFound
         onValueChanged: {
-            root.cpuTempStr = (value !== undefined && !isNaN(value) && Number(value) > 0) ? Math.round(Number(value)) + "°C" : "";
+            if (value !== undefined && !isNaN(value) && Number(value) > 0)
+                root.cpuTempStr = Math.round(Number(value)) + "°C";
         }
     }
 
     Sensors.Sensor {
         sensorId: "gpu/gpu0/temperature"
-        updateRateLimit: root.refreshMs
-        enabled: root.isWindowVisible
+        updateRateLimit: root.gpuTempStr !== "" ? root.refreshMs : 0
+        enabled: root.isWindowVisible && root.hwmonChecked && !root.hwmonGpuFound
         onValueChanged: {
-            root.gpuTempStr = (value !== undefined && !isNaN(value) && Number(value) > 0) ? Math.round(Number(value)) + "°C" : "";
+            if (value !== undefined && !isNaN(value) && Number(value) > 0)
+                root.gpuTempStr = Math.round(Number(value)) + "°C";
+        }
+    }
+
+    Plasma5Support.DataSource {
+        id: systemInfoSource
+
+        function fetch() {
+            connectSource("read up _ < /proc/uptime 2>/dev/null || up=''; cpu_t=''; gpu_t=''; for d in /sys/class/hwmon/hwmon*; do read n < \"$d/name\" 2>/dev/null || continue; case \"$n\" in k10temp|coretemp|zenpower|zenergy) [ -z \"$cpu_t\" ] && { read cpu_t < \"$d/temp1_input\" 2>/dev/null || for tf in \"$d\"/temp*_input; do read cpu_t < \"$tf\" 2>/dev/null && break; done; } ;; amdgpu|radeon|nouveau|xe|i915) [ -z \"$gpu_t\" ] && { read gpu_t < \"$d/temp1_input\" 2>/dev/null || for tf in \"$d\"/temp*_input; do read gpu_t < \"$tf\" 2>/dev/null && break; done; } ;; esac; done; printf '%s|%s|%s\\n' \"$up\" \"$cpu_t\" \"$gpu_t\"");
+        }
+
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(source, data) {
+            disconnectSource(source);
+            var stdout = (data["stdout"] || "").trim();
+            var parts = stdout.split("|");
+            if (parts.length >= 3) {
+                if (root.uptimeDisplayMode !== 0) {
+                    var upSec = parseFloat(parts[0]);
+                    if (!isNaN(upSec) && upSec > 0)
+                        root.systemUptimeStr = root.formatUptime(upSec);
+                } else {
+                    root.systemUptimeStr = "";
+                }
+
+                var cpuRaw = parseFloat(parts[1]);
+                if (!isNaN(cpuRaw) && cpuRaw > 0) {
+                    root.hwmonCpuFound = true;
+                    root.cpuTempStr = Math.round(cpuRaw / 1000) + "°C";
+                }
+
+                var gpuRaw = parseFloat(parts[2]);
+                if (!isNaN(gpuRaw) && gpuRaw > 0) {
+                    root.hwmonGpuFound = true;
+                    root.gpuTempStr = Math.round(gpuRaw / 1000) + "°C";
+                }
+            }
+            root.hwmonChecked = true;
         }
     }
 
@@ -573,6 +617,8 @@ Item {
                 var parsed = JSON.parse((data["stdout"] || "{}").trim() || "{}");
                 if (parsed && typeof parsed === "object") {
                     root.cachedDesktopIcons = parsed;
+                    if (root.browserProfileRows.length > 0)
+                        root.rebuildRows();
                 }
             } catch (e) {}
         }
@@ -582,7 +628,7 @@ Item {
         id: browserProfileSource
 
         function fetchBrowserProfiles() {
-            connectSource("python3 -c \"import glob, os; procs = []; [procs.append(f'{pid} {int(ap[1])} {int(ap[11])+int(ap[12])} {pss} {cmd}') for p in glob.glob('/proc/[0-9]*') for pid in [int(os.path.basename(p))] if os.path.exists(f'/proc/{pid}/cmdline') and os.path.exists(f'/proc/{pid}/stat') for cmd in [open(f'/proc/{pid}/cmdline').read().replace('\\x00',' ')] for exe in [cmd.split()[0] if cmd.strip() else ''] if ('/zen/' in exe.lower() or os.path.basename(exe).lower().startswith('zen') or os.path.basename(exe).lower() in ['firefox','firefox-bin','chrome','google-chrome','chromium','brave','brave-browser']) for s in [open(f'/proc/{pid}/stat').read()] for ap in [s[s.rfind(')')+2:].split()] if len(ap)>=22 for pss in [next((int(line.split()[1]) for line in open(f'/proc/{pid}/smaps_rollup') if line.startswith('Pss:')), int(ap[21])*4) if os.path.exists(f'/proc/{pid}/smaps_rollup') else int(ap[21])*4]]; print('\\n'.join(procs))\" 2>/dev/null || true");
+            connectSource("python3 -c \"import os\nnames = {'firefox','firefox-bin','chrome','google-chrome','chromium','brave','brave-browser'}\nprocs = []\nfor e in os.scandir('/proc'):\n    if not e.name.isdigit(): continue\n    pid = e.name\n    try:\n        with open(f'/proc/{pid}/cmdline', 'rb') as f: raw = f.read()\n        if not raw: continue\n        cmd = raw.replace(b'\\x00', b' ').decode('utf-8', 'ignore')\n        exe = cmd.split(None, 1)[0].lower() if cmd.strip() else ''\n        base = exe.rsplit('/', 1)[-1]\n        if not ('/zen/' in exe or base.startswith('zen') or base in names): continue\n        with open(f'/proc/{pid}/stat', 'r') as f: s = f.read()\n        ap = s[s.rfind(')')+2:].split()\n        if len(ap) < 22: continue\n        pss = int(ap[21]) * 4\n        try:\n            with open(f'/proc/{pid}/smaps_rollup', 'r') as f:\n                for line in f:\n                    if line.startswith('Pss:'):\n                        pss = int(line.split()[1]); break\n        except OSError: pass\n        procs.append(f'{pid} {int(ap[1])} {int(ap[11])+int(ap[12])} {pss} {cmd}')\n    except (OSError, ValueError): continue\nprint('\\n'.join(procs))\" 2>/dev/null || true");
         }
 
         engine: "executable"
@@ -606,14 +652,14 @@ Item {
             id: topInfoRow
 
             Layout.fillWidth: true
-            visible: (root.uptimeDisplayMode === 2 && root.systemUptimeStr !== "") || root.cpuTempStr !== "" || root.gpuTempStr !== ""
+            visible: (root.uptimeDisplayMode !== 0 && root.systemUptimeStr !== "") || root.cpuTempStr !== "" || root.gpuTempStr !== ""
             Layout.leftMargin: Kirigami.Units.smallSpacing * 2
             Layout.rightMargin: Kirigami.Units.smallSpacing * 2 + (Kirigami.Units.iconSizes.smallMedium + Kirigami.Units.smallSpacing * 2) / 2
 
             QQC2.Label {
                 id: uptimeLabel
 
-                visible: root.uptimeDisplayMode === 2 && root.systemUptimeStr !== ""
+                visible: root.uptimeDisplayMode !== 0 && root.systemUptimeStr !== ""
                 text: i18n("Uptime: %1", root.systemUptimeStr)
                 font.pointSize: Kirigami.Theme.defaultFont.pointSize * 0.9
                 font.italic: true
@@ -661,7 +707,7 @@ Item {
                 label: i18n("Process Name")
                 col: "name"
                 alignment: Qt.AlignLeft
-                extraText: (root.uptimeDisplayMode === 1 && root.systemUptimeStr !== "") ? i18n("Uptime: %1", root.systemUptimeStr) : ""
+                extraText: ""
                 onSortClicked: {
                     if (root.sortColumn === "name") {
                         root.sortAscending = !root.sortAscending;

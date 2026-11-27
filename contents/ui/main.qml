@@ -8,6 +8,7 @@ import org.kde.kirigami as Kirigami
 PlasmoidItem {
     id: root
     preferredRepresentation: compactRepresentation
+    preloadFullRepresentation: true
 
     readonly property color iconColor:
     Plasmoid.configuration.baseIconColor.length > 0
